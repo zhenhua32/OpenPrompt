@@ -20,3 +20,4 @@ log.txt
 examples/
 hyperopt/
 docs/source/logs/*
+venv/
