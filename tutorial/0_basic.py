@@ -10,9 +10,11 @@
 
 # load dataset
 from datasets import load_dataset
+
 # raw_dataset = load_dataset('super_glue', 'cb', cache_dir="../datasets/.cache/huggingface_datasets")
 # raw_dataset['train'][0]
 from datasets import load_from_disk
+
 raw_dataset = load_from_disk("/home/hushengding/huggingface_datasets/saved_to_disk/super_glue.cb")
 # Note that if you are running this scripts inside a GPU cluster, there are chances are you are not able to connect to huggingface website directly.
 # In this case, we recommend you to run `raw_dataset = load_dataset(...)` on some machine that have internet connections.
@@ -23,26 +25,30 @@ raw_dataset = load_from_disk("/home/hushengding/huggingface_datasets/saved_to_di
 from openprompt.data_utils import InputExample
 
 dataset = {}
-for split in ['train', 'validation', 'test']:
+for split in ["train", "validation", "test"]:
     dataset[split] = []
     for data in raw_dataset[split]:
-        input_example = InputExample(text_a = data['premise'], text_b = data['hypothesis'], label=int(data['label']), guid=data['idx'])
+        input_example = InputExample(
+            text_a=data["premise"], text_b=data["hypothesis"], label=int(data["label"]), guid=data["idx"]
+        )
         dataset[split].append(input_example)
-print(dataset['train'][0])
+print(dataset["train"][0])
 
 # You can load the plm related things provided by openprompt simply by calling:
 from openprompt.plms import load_plm
+
 plm, tokenizer, model_config, WrapperClass = load_plm("t5", "t5-base")
 
-# Constructing Template
+# Constructing Template 构建模板, 这里也使用 placeholder 的
 # A template can be constructed from the yaml config, but it can also be constructed by directly passing arguments.
 from openprompt.prompts import ManualTemplate
+
 template_text = '{"placeholder":"text_a"} Question: {"placeholder":"text_b"}? Is it correct? {"mask"}.'
 mytemplate = ManualTemplate(tokenizer=tokenizer, text=template_text)
 
+# 可视化一个样本, 看看模板是如何包装的
 # To better understand how does the template wrap the example, we visualize one instance.
-
-wrapped_example = mytemplate.wrap_one_example(dataset['train'][0])
+wrapped_example = mytemplate.wrap_one_example(dataset["train"][0])
 print(wrapped_example)
 
 
@@ -52,35 +58,51 @@ print(wrapped_example)
 # the configuration in `openprompt.plms.__init__.py`.
 # Note that when t5 is used for classification, we only need to pass <pad> <extra_id_0> <eos> to decoder.
 # The loss is calcaluted at <extra_id_0>. Thus passing decoder_max_length=3 saves the space
-wrapped_t5tokenizer = WrapperClass(max_seq_length=128, decoder_max_length=3, tokenizer=tokenizer,truncate_method="head")
+wrapped_t5tokenizer = WrapperClass(
+    max_seq_length=128, decoder_max_length=3, tokenizer=tokenizer, truncate_method="head"
+)
 # or
 from openprompt.plms import T5TokenizerWrapper
-wrapped_t5tokenizer= T5TokenizerWrapper(max_seq_length=128, decoder_max_length=3, tokenizer=tokenizer,truncate_method="head")
+
+wrapped_t5tokenizer = T5TokenizerWrapper(
+    max_seq_length=128, decoder_max_length=3, tokenizer=tokenizer, truncate_method="head"
+)
 
 # You can see what a tokenized example looks like by
 tokenized_example = wrapped_t5tokenizer.tokenize_one_example(wrapped_example, teacher_forcing=False)
 print(tokenized_example)
-print(tokenizer.convert_ids_to_tokens(tokenized_example['input_ids']))
-print(tokenizer.convert_ids_to_tokens(tokenized_example['decoder_input_ids']))
+print(tokenizer.convert_ids_to_tokens(tokenized_example["input_ids"]))
+print(tokenizer.convert_ids_to_tokens(tokenized_example["decoder_input_ids"]))
 
 # Now it's time to convert the whole dataset into the input format!
 # Simply loop over the dataset to achieve it!
 
 model_inputs = {}
-for split in ['train', 'validation', 'test']:
+for split in ["train", "validation", "test"]:
     model_inputs[split] = []
     for sample in dataset[split]:
-        tokenized_example = wrapped_t5tokenizer.tokenize_one_example(mytemplate.wrap_one_example(sample), teacher_forcing=False)
+        tokenized_example = wrapped_t5tokenizer.tokenize_one_example(
+            mytemplate.wrap_one_example(sample), teacher_forcing=False
+        )
         model_inputs[split].append(tokenized_example)
 
 
 # We provide a `PromptDataLoader` class to help you do all the above matters and wrap them into an `torch.DataLoader` style iterator.
 from openprompt import PromptDataLoader
 
-train_dataloader = PromptDataLoader(dataset=dataset["train"], template=mytemplate, tokenizer=tokenizer,
-    tokenizer_wrapper_class=WrapperClass, max_seq_length=256, decoder_max_length=3,
-    batch_size=4,shuffle=True, teacher_forcing=False, predict_eos_token=False,
-    truncate_method="head")
+train_dataloader = PromptDataLoader(
+    dataset=dataset["train"],
+    template=mytemplate,
+    tokenizer=tokenizer,
+    tokenizer_wrapper_class=WrapperClass,
+    max_seq_length=256,
+    decoder_max_length=3,
+    batch_size=4,
+    shuffle=True,
+    teacher_forcing=False,
+    predict_eos_token=False,
+    truncate_method="head",
+)
 # next(iter(train_dataloader))
 
 
@@ -91,12 +113,11 @@ from openprompt.prompts import ManualVerbalizer
 import torch
 
 # for example the verbalizer contains multiple label words in each class
-myverbalizer = ManualVerbalizer(tokenizer, num_classes=3,
-                        label_words=[["yes"], ["no"], ["maybe"]])
+myverbalizer = ManualVerbalizer(tokenizer, num_classes=3, label_words=[["yes"], ["no"], ["maybe"]])
 
 print(myverbalizer.label_words_ids)
-logits = torch.randn(2,len(tokenizer)) # creating a pseudo output from the plm, and
-print(myverbalizer.process_logits(logits)) # see what the verbalizer do
+logits = torch.randn(2, len(tokenizer))  # creating a pseudo output from the plm, and
+print(myverbalizer.process_logits(logits))  # see what the verbalizer do
 
 
 # Although you can manually combine the plm, template, verbalizer together, we provide a pipeline
@@ -105,18 +126,22 @@ print(myverbalizer.process_logits(logits)) # see what the verbalizer do
 from openprompt import PromptForClassification
 
 use_cuda = True
-prompt_model = PromptForClassification(plm=plm,template=mytemplate, verbalizer=myverbalizer, freeze_plm=False)
+prompt_model = PromptForClassification(plm=plm, template=mytemplate, verbalizer=myverbalizer, freeze_plm=False)
 if use_cuda:
-    prompt_model=  prompt_model.cuda()
+    prompt_model = prompt_model.cuda()
 
 # Now the training is standard
-from transformers import  AdamW, get_linear_schedule_with_warmup
+from transformers import AdamW, get_linear_schedule_with_warmup
+
 loss_func = torch.nn.CrossEntropyLoss()
-no_decay = ['bias', 'LayerNorm.weight']
+no_decay = ["bias", "LayerNorm.weight"]
 # it's always good practice to set no decay to biase and LayerNorm parameters
 optimizer_grouped_parameters = [
-    {'params': [p for n, p in prompt_model.named_parameters() if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
-    {'params': [p for n, p in prompt_model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+    {
+        "params": [p for n, p in prompt_model.named_parameters() if not any(nd in n for nd in no_decay)],
+        "weight_decay": 0.01,
+    },
+    {"params": [p for n, p in prompt_model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
 ]
 
 optimizer = AdamW(optimizer_grouped_parameters, lr=1e-4)
@@ -127,20 +152,29 @@ for epoch in range(10):
         if use_cuda:
             inputs = inputs.cuda()
         logits = prompt_model(inputs)
-        labels = inputs['label']
+        labels = inputs["label"]
         loss = loss_func(logits, labels)
         loss.backward()
         tot_loss += loss.item()
         optimizer.step()
         optimizer.zero_grad()
-        if step %100 ==1:
-            print("Epoch {}, average loss: {}".format(epoch, tot_loss/(step+1)), flush=True)
+        if step % 100 == 1:
+            print("Epoch {}, average loss: {}".format(epoch, tot_loss / (step + 1)), flush=True)
 
 # Evaluate
-validation_dataloader = PromptDataLoader(dataset=dataset["validation"], template=mytemplate, tokenizer=tokenizer,
-    tokenizer_wrapper_class=WrapperClass, max_seq_length=256, decoder_max_length=3,
-    batch_size=4,shuffle=False, teacher_forcing=False, predict_eos_token=False,
-    truncate_method="head")
+validation_dataloader = PromptDataLoader(
+    dataset=dataset["validation"],
+    template=mytemplate,
+    tokenizer=tokenizer,
+    tokenizer_wrapper_class=WrapperClass,
+    max_seq_length=256,
+    decoder_max_length=3,
+    batch_size=4,
+    shuffle=False,
+    teacher_forcing=False,
+    predict_eos_token=False,
+    truncate_method="head",
+)
 
 allpreds = []
 alllabels = []
@@ -148,10 +182,9 @@ for step, inputs in enumerate(validation_dataloader):
     if use_cuda:
         inputs = inputs.cuda()
     logits = prompt_model(inputs)
-    labels = inputs['label']
+    labels = inputs["label"]
     alllabels.extend(labels.cpu().tolist())
     allpreds.extend(torch.argmax(logits, dim=-1).cpu().tolist())
 
-acc = sum([int(i==j) for i,j in zip(allpreds, alllabels)])/len(allpreds)
+acc = sum([int(i == j) for i, j in zip(allpreds, alllabels)]) / len(allpreds)
 print(acc)
-
